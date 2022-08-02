@@ -59,11 +59,16 @@ def _v(n, t):
 def BuildPkinit_pa(user_cert, cert_pass, reqbodyHex, diffieHellmanExchange):
     paAsReq = PA_PK_AS_REQ()
 
-    timestamp = (datetime.datetime.utcnow().isoformat()[:-7] + 'Z').replace('-','').replace(':','').replace('T','')
+    timestamp = (
+        f'{datetime.datetime.utcnow().isoformat()[:-7]}Z'.replace('-', '')
+        .replace(':', '')
+        .replace('T', '')
+    )
+
     authpack = AuthPack()
 
     checksum = hashlib.sha1(reqbodyHex).hexdigest()
-    
+
     authpack['pkAuthenticator']['cusec'] = 275425
     authpack['pkAuthenticator']['ctime'] = timestamp
     authpack['pkAuthenticator']['nonce'] = 0
@@ -75,7 +80,7 @@ def BuildPkinit_pa(user_cert, cert_pass, reqbodyHex, diffieHellmanExchange):
         namedtype.NamedType('1', univ.Integer()),
         namedtype.NamedType('2', univ.Integer())
     ))  # public key for DH y = g^x mod p
-    
+
     # longPrime- n or p
     seq['1'] = int('00ffffffffffffffffc90fdaa22168c234c4c6628b80dc1cd129024e088a67cc74020bbea63b139b22514a08798e3404ddef9519b3cd3a431b302b0a6df25f14374fe1356d6d51c245e485b576625e7ec6f44c42e9a637ed6b0bff5cb6f406b7edee386bfb5a899fa5ae9f24117c4b1fe649286651ece65381ffffffffffffffff', 16)  # safe prime
 
@@ -95,15 +100,14 @@ def BuildPkinit_pa(user_cert, cert_pass, reqbodyHex, diffieHellmanExchange):
     sizeWithoutTags = str(hex(len(hex(diffieHellmanExchange[1].public_key().public_numbers().y)[2:-1]) / 2 + 1)[2:])
     sizeWithTags = str(hex(len(encodedPublic) / 2 + 1)[2:])
 
-                           #sizeWithoutTags
     encodedPublic = '03' + '81' + sizeWithTags + '00' + encodedPublic
-    
+
     authpack['clientPublicValue']['algorithm'] = aidentifier2
     authpack['clientPublicValue']['subjectPublicKey'] = bytearray.fromhex(encodedPublic)
 
     dhNonce = '6B328FA66EEBDFD3D69ED34E5007776AB30832A2ED1DCB1699781BFE0BEDF87A'
     authpack['clientDHNonce'] = bytearray.fromhex(dhNonce)
-    
+
     authPackData = encode(authpack).encode('hex')
 
     return sign_msg(user_cert, cert_pass, authPackData)
@@ -175,9 +179,9 @@ def build_as_req_negoEx(user_cert, cert_pass, remoteComputer, diffieHellmanExcha
     as_req = AsReq()
     req = SPNEGO_PKINIT()
     req_body = build_req_body_NegoEx(remoteComputer, cname, req)
-    
+
     padata = BuildPkinit_pa(user_cert, cert_pass, encode(req_body), diffieHellmanExchange)
-    
+
     newPaData = NegoPAData()
     newPaData['value'] = bytearray.fromhex(padata[38:])
     newPaData = encode(newPaData).encode('hex')
@@ -185,7 +189,10 @@ def build_as_req_negoEx(user_cert, cert_pass, remoteComputer, diffieHellmanExcha
     ########################################################################
     # there is a problem with asn1 encapsulation so i had to manually insert 
     pack = newPaData[16:]
-    packNewData = newPaData[:8] + '8082' + "{0:0{1}x}".format((len(pack) / 2),4) + pack
+    packNewData = (
+        f'{newPaData[:8]}8082' + "{0:0{1}x}".format((len(pack) / 2), 4) + pack
+    )
+
 
     as_req['pvno'] = 5
     as_req['msg-type'] = 10
@@ -200,7 +207,7 @@ def build_as_req_negoEx(user_cert, cert_pass, remoteComputer, diffieHellmanExcha
     req['Kerberos']['AsReq']['msg-type'] = 10
     req['Kerberos']['AsReq']['padata'][0]['padata-type'] = 16
     req['Kerberos']['AsReq']['padata'][0]['padata-value'] = bytearray.fromhex(packNewData) #bytearray.fromhex(encode(newPaData).encode('hex'))
-    
+
     return issuer, encode(req).encode('hex')
 
 def send_req(req, kdc, port=88):
@@ -242,7 +249,7 @@ def truncate(value, keysize):
             break
         output += currentDigest
         currentNum += 1  
-   
+
     return output
 
 def decrypt_pk_dh(data, user_cert, cert_pass, diffieHellmanExchange):
@@ -264,7 +271,7 @@ def decrypt_pk_dh(data, user_cert, cert_pass, diffieHellmanExchange):
     dcPublicNumbers = dh.DHPublicNumbers(dcPublicKey, diffieHellmanExchange[2])
 
     backend = default_backend()
-    
+
     dcPublicKey = backend.load_dh_public_numbers(dcPublicNumbers)
     shared_key = diffieHellmanExchange[1].exchange(dcPublicKey)
     sharedHexKey = shared_key.encode('hex')
@@ -280,11 +287,7 @@ def decrypt_pk_dh(data, user_cert, cert_pass, diffieHellmanExchange):
         truncateKey = truncate(fullKey, 32)
         key = Key(cipher.enctype, truncateKey)
 
-    elif etype == Enctype.AES128:
-        truncateKey = truncate(fullKey, 16)
-        key = Key(cipher.enctype, truncateKey)
-
-    elif etype == Enctype.RC4:
+    elif etype in [Enctype.AES128, Enctype.RC4]:
         truncateKey = truncate(fullKey, 16)
         key = Key(cipher.enctype, truncateKey)
 

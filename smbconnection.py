@@ -94,7 +94,7 @@ class SMBConnection:
 
         if existingConnection is not None:
             # Existing Connection must be a smb or smb3 instance
-            assert ( isinstance(existingConnection,smb.SMB) or isinstance(existingConnection, SMB3))
+            assert isinstance(existingConnection, (smb.SMB, SMB3))
             self._SMBConnection = existingConnection
             self._preferredDialect = self._SMBConnection.getDialect()
             self._doKerberos = self._SMBConnection.getKerberos()
@@ -141,25 +141,38 @@ class SMBConnection:
             # If no preferredDialect sent, we try the highest available one.
             packet = self.negotiateSessionWildcard(self._myName, self._remoteName, self._remoteHost, self._sess_port,
                                                    self._timeout, True, flags1=flags1, flags2=flags2, data=negoData)
-            if packet[0:1] == b'\xfe':
-                # Answer is SMB2 packet
-                self._SMBConnection = smb3.SMB3(self._remoteName, self._remoteHost, self._myName, hostType,
-                                                self._sess_port, self._timeout, session=self._nmbSession,
-                                                negSessionResponse=SMB2Packet(packet))
-            else:
-                # Answer is SMB packet, sticking to SMBv1
-                self._SMBConnection = smb.SMB(self._remoteName, self._remoteHost, self._myName, hostType,
-                                              self._sess_port, self._timeout, session=self._nmbSession,
-                                              negPacket=packet)
+            self._SMBConnection = (
+                smb3.SMB3(
+                    self._remoteName,
+                    self._remoteHost,
+                    self._myName,
+                    hostType,
+                    self._sess_port,
+                    self._timeout,
+                    session=self._nmbSession,
+                    negSessionResponse=SMB2Packet(packet),
+                )
+                if packet[:1] == b'\xfe'
+                else smb.SMB(
+                    self._remoteName,
+                    self._remoteHost,
+                    self._myName,
+                    hostType,
+                    self._sess_port,
+                    self._timeout,
+                    session=self._nmbSession,
+                    negPacket=packet,
+                )
+            )
+
+        elif preferredDialect == smb.SMB_DIALECT:
+            self._SMBConnection = smb.SMB(self._remoteName, self._remoteHost, self._myName, hostType,
+                                          self._sess_port, self._timeout)
+        elif preferredDialect in [SMB2_DIALECT_002, SMB2_DIALECT_21, SMB2_DIALECT_30, SMB2_DIALECT_311]:
+            self._SMBConnection = smb3.SMB3(self._remoteName, self._remoteHost, self._myName, hostType,
+                                            self._sess_port, self._timeout, preferredDialect=preferredDialect)
         else:
-            if preferredDialect == smb.SMB_DIALECT:
-                self._SMBConnection = smb.SMB(self._remoteName, self._remoteHost, self._myName, hostType,
-                                              self._sess_port, self._timeout)
-            elif preferredDialect in [SMB2_DIALECT_002, SMB2_DIALECT_21, SMB2_DIALECT_30, SMB2_DIALECT_311]:
-                self._SMBConnection = smb3.SMB3(self._remoteName, self._remoteHost, self._myName, hostType,
-                                                self._sess_port, self._timeout, preferredDialect=preferredDialect)
-            else:
-                raise Exception("Unknown dialect %s")
+            raise Exception("Unknown dialect %s")
 
         # propagate flags to the smb sub-object, except for Unicode (if server supports)
         # does not affect smb3 objects
@@ -339,17 +352,17 @@ class SMBConnection:
                 # No cache present
                 pass
             else:
-                LOG.debug("Using Kerberos Cache: %s" % os.getenv('KRB5CCNAME'))
+                LOG.debug(f"Using Kerberos Cache: {os.getenv('KRB5CCNAME')}")
                 # retrieve domain information from CCache file if needed
                 if domain == '':
                     domain = ccache.principal.realm['data'].decode('utf-8')
-                    LOG.debug('Domain retrieved from CCache: %s' % domain)
+                    LOG.debug(f'Domain retrieved from CCache: {domain}')
 
-                principal = 'cifs/%s@%s' % (self.getRemoteName().upper(), domain.upper())
+                principal = f'cifs/{self.getRemoteName().upper()}@{domain.upper()}'
                 creds = ccache.getCredential(principal)
                 if creds is None:
                     # Let's try for the TGT and go from there
-                    principal = 'krbtgt/%s@%s' % (domain.upper(),domain.upper())
+                    principal = f'krbtgt/{domain.upper()}@{domain.upper()}'
                     creds =  ccache.getCredential(principal)
                     if creds is not None:
                         TGT = creds.toTGT()
@@ -361,12 +374,13 @@ class SMBConnection:
                     LOG.debug('Using TGS from cache')
 
                 # retrieve user information from CCache file if needed
-                if user == '' and creds is not None:
-                    user = creds['client'].prettyPrint().split(b'@')[0].decode('utf-8')
-                    LOG.debug('Username retrieved from CCache: %s' % user)
-                elif user == '' and len(ccache.principal.components) > 0:
-                    user = ccache.principal.components[0]['data'].decode('utf-8')
-                    LOG.debug('Username retrieved from CCache: %s' % user)
+                if user == '':
+                    if creds is not None:
+                        user = creds['client'].prettyPrint().split(b'@')[0].decode('utf-8')
+                        LOG.debug(f'Username retrieved from CCache: {user}')
+                    elif len(ccache.principal.components) > 0:
+                        user = ccache.principal.components[0]['data'].decode('utf-8')
+                        LOG.debug(f'Username retrieved from CCache: {user}')
 
         while True:
             try:
@@ -378,18 +392,22 @@ class SMBConnection:
             except (smb.SessionError, smb3.SessionError) as e:
                 raise SessionError(e.get_error_code(), e.get_error_packet())
             except KerberosError as e:
-                if e.getErrorCode() == constants.ErrorCodes.KDC_ERR_ETYPE_NOSUPP.value:
-                    # We might face this if the target does not support AES
-                    # So, if that's the case we'll force using RC4 by converting
-                    # the password to lm/nt hashes and hope for the best. If that's already
-                    # done, byebye.
-                    if lmhash == '' and nthash == '' and (aesKey == '' or aesKey is None) and TGT is None and TGS is None:
-                        lmhash = compute_lmhash(password)
-                        nthash = compute_nthash(password)
-                    else:
-                        raise e
-                else:
+                if (
+                    e.getErrorCode()
+                    != constants.ErrorCodes.KDC_ERR_ETYPE_NOSUPP.value
+                ):
                     raise e
+                if (
+                    lmhash != ''
+                    or nthash != ''
+                    or aesKey != ''
+                    and aesKey is not None
+                    or TGT is not None
+                    or TGS is not None
+                ):
+                    raise e
+                lmhash = compute_lmhash(password)
+                nthash = compute_nthash(password)
 
     # changed from original impacket
     def kerberosCertificateLogin(self, userCert, certPass):
@@ -412,12 +430,10 @@ class SMBConnection:
 
 
     def connectTree(self,share):
-        if self.getDialect() == smb.SMB_DIALECT:
-            # If we already have a UNC we do nothing.
-            if ntpath.ismount(share) is False:
-                # Else we build it
-                share = ntpath.basename(share)
-                share = '\\\\' + self.getRemoteHost() + '\\' + share
+        if self.getDialect() == smb.SMB_DIALECT and ntpath.ismount(share) is False:
+            # Else we build it
+            share = ntpath.basename(share)
+            share = '\\\\' + self.getRemoteHost() + '\\' + share
         try:
             return self._SMBConnection.connect_tree(share)
         except (smb.SessionError, smb3.SessionError) as e:
@@ -631,19 +647,17 @@ class SMBConnection:
             try:
                 bytesRead = self._SMBConnection.read_andx(treeId, fileId, offset, toRead)
             except (smb.SessionError, smb3.SessionError) as e:
-                if e.get_error_code() == nt_errors.STATUS_END_OF_FILE:
-                    toRead = b''
-                    break
-                else:
+                if e.get_error_code() != nt_errors.STATUS_END_OF_FILE:
                     raise SessionError(e.get_error_code(), e.get_error_packet())
 
+                toRead = b''
+                break
             data += bytesRead
-            if len(data) >= bytesToRead:
-                finished = True
-            elif len(bytesRead) == 0:
-                # End of the file achieved.
-                finished = True
-            elif singleCall is True:
+            if (
+                len(data) >= bytesToRead
+                or len(bytesRead) == 0
+                or singleCall is True
+            ):
                 finished = True
             else:
                 offset += len(bytesRead)

@@ -18,7 +18,7 @@ def sign_msg(pfxFile, pfxPass, data):
     except Exception as e:
         if str(e).startswith('CryptAcquireCertificatePrivateKey: [Error 2148081675]'):
             raise Exception("Couldn't Acquire Certificate Private Key")
-    
+
     hCertPubKey = gdef.HCRYPTKEY()
     handleKey = gdef.PVOID()
     pInfo = ctypes.pointer(hContext.contents.pCertInfo.contents.SubjectPublicKeyInfo)
@@ -65,20 +65,25 @@ def sign_msg(pfxFile, pfxPass, data):
     except Exception as e:
         if str(e).startswith('CryptMsgOpenToEncode: [Error 2147942487]'):
             raise Exception("Couldn't Message Open To Encode, Invalid PIN Provided")
-        
+
     ofs = getattr(OCTET, 'length').offset
     pointerDOutputLen = ctypes.pointer(ctypes.c_ulong.from_buffer(output,ofs))
     if hCryptMsg:
         if winproxy.CryptMsgUpdate(hCryptMsg, input.value, input.length, True):
             if winproxy.CryptMsgGetParam(hCryptMsg, gdef.CMSG_CONTENT_PARAM, 0, None, pointerDOutputLen):
                 output.value = ctypes.cast(ctypes.pointer(ctypes.create_string_buffer(pointerDOutputLen.contents.value)), ctypes.POINTER(ctypes.c_ubyte))
-                status = winproxy.CryptMsgGetParam(hCryptMsg, gdef.CMSG_CONTENT_PARAM, 0, output.value, pointerDOutputLen)
-                if not status:
-                    print("CryptMsgGetParam Error")
-
-                else:
+                if status := winproxy.CryptMsgGetParam(
+                    hCryptMsg,
+                    gdef.CMSG_CONTENT_PARAM,
+                    0,
+                    output.value,
+                    pointerDOutputLen,
+                ):
                     outData = output._objects['1']['1']
                     return outData.raw.encode('hex')
+
+                else:
+                    print("CryptMsgGetParam Error")
 
             else:
                 print("CryptMsgGetParam Error")

@@ -44,7 +44,7 @@ class LSAP_TOKEN_INFO_INTEGRITY(ctypes.Structure):
 def generateRandom(stringLength=32):
     letters = string.ascii_lowercase
     numbers = ''.join(str(i) for i in range(10))
-    return ''.join(random.choice(letters + numbers) for i in range(stringLength))
+    return ''.join(random.choice(letters + numbers) for _ in range(stringLength))
 
 class WST_MESSAGE_TYPE(Enum):
     WST_MESSAGE_TYPE_CLIENT_HELLO = 0
@@ -207,19 +207,21 @@ def generateMetaDataAsn(remoteComputer, issuer):
 toHex = lambda x: "".join([hex(ord(c))[2:].zfill(2) for c in x])
 
 def Pack(ctype_instance):
-    buf = toHex(ctypes.string_at(ctypes.byref(ctype_instance), ctypes.sizeof(ctype_instance)))
-    return buf
+    return toHex(
+        ctypes.string_at(
+            ctypes.byref(ctype_instance), ctypes.sizeof(ctype_instance)
+        )
+    )
 
 def Unpack(ctype, buf):
     cstring = ctypes.create_string_buffer(buf)
-    ctype_instance = ctypes.cast(ctypes.pointer(cstring), ctypes.POINTER(ctype)).contents
-    return ctype_instance
+    return ctypes.cast(ctypes.pointer(cstring), ctypes.POINTER(ctype)).contents
 
 def generateInitiatorNego():
     CONVERSATION_ID = uuid.uuid4().hex
 
     d = '3bfe3cf76c6d01ea3aff5261bf7d0a4a'
-    L = [int(a+b,16) for a,b in zip(d[0::2],d[1::2])] # change from d to CONVERSATION_ID
+    L = [int(a+b,16) for a,b in zip(d[::2], d[1::2])]
 
     guidIn16Bytes = (ctypes.c_ubyte * 16)(*L)
 
@@ -227,11 +229,11 @@ def generateInitiatorNego():
     longnegoex = int(toHex("NEGOEXTS"),16)
 
     authschem = '5c33530deaf90d4db2ec4ae3786ec308'
-    authsc = [int(a + b, 16) for a, b in zip(authschem[0::2], authschem[1::2])]  # change from d to AUTH_SCHEME
+    authsc = [int(a + b, 16) for a, b in zip(authschem[::2], authschem[1::2])]
     authschemIn16Bytes = (ctypes.c_ubyte * 16)(*authsc)
 
     ran = 'ffaf0c135369c5075ae3868ec6364dea9615ab5bb22e6c708cf18c133696dd57'
-    R = [int(a+b,16) for a,b in zip(ran[0::2],ran[1::2])] # change from d to RANDOM
+    R = [int(a+b,16) for a,b in zip(ran[::2], ran[1::2])]
     randomIn32Bytes = (ctypes.c_ubyte * 32)(*R)
 
     signature = WST_MESSAGE_SIGNATURE(longnegoex)
@@ -264,14 +266,14 @@ def generateInitiatorNego():
 
 def generateMetaData():
     d = '3bfe3cf76c6d01ea3aff5261bf7d0a4a'
-    L = [int(a + b, 16) for a, b in zip(d[0::2], d[1::2])]  # change from d to CONVERSATION_ID
+    L = [int(a + b, 16) for a, b in zip(d[::2], d[1::2])]
 
     guidIn16Bytes = (ctypes.c_ubyte * 16)(*L)
 
     longnegoex = int(toHex("NEGOEXTS"), 16)
 
     authschem = '5c33530deaf90d4db2ec4ae3786ec308'
-    authsc = [int(a + b, 16) for a, b in zip(authschem[0::2], authschem[1::2])]  # change from d to AUTH_SCHEME
+    authsc = [int(a + b, 16) for a, b in zip(authschem[::2], authschem[1::2])]
     authschemIn16Bytes = (ctypes.c_ubyte * 16)(*authsc)
 
     signature = WST_MESSAGE_SIGNATURE(longnegoex)
@@ -284,25 +286,23 @@ def generateMetaData():
                                 guidIn16Bytes
                                 )
 
-    exchange2 = WST_BYTE_VECTOR(64, # should be ctypes.sizeof(header) + 8,
-                               int(len(data) / 2),
-                               0)
+    exchange2 = WST_BYTE_VECTOR(64, len(data) // 2, 0)
 
     exchangeMsg2 = WST_EXCHANGE_MESSAGE(header2,
                                        authschemIn16Bytes,
                                        exchange2)
 
-    header = WST_MESSAGE_HEADER(signature,
-                                 2,
-                                 1,  # change to 1
-                                 ctypes.sizeof(header2) + 24,
-                                 ctypes.sizeof(exchangeMsg2) + int(len(data) / 2),
-                                 guidIn16Bytes
-                                 )
+    header = WST_MESSAGE_HEADER(
+        signature,
+        2,
+        1,
+        ctypes.sizeof(header2) + 24,
+        ctypes.sizeof(exchangeMsg2) + len(data) // 2,
+        guidIn16Bytes,
+    )
 
-    exchange = WST_BYTE_VECTOR(ctypes.sizeof(header) + 24,
-                                int(len(data) / 2),
-                                0)
+
+    exchange = WST_BYTE_VECTOR(ctypes.sizeof(header) + 24, len(data) // 2, 0)
 
     exchangeMsg = WST_EXCHANGE_MESSAGE(header,
                                         authschemIn16Bytes,
@@ -312,14 +312,14 @@ def generateMetaData():
 
 def generateApRequest(): # same struct as meta data
     d = '3bfe3cf76c6d01ea3aff5261bf7d0a4a'
-    L = [int(a + b, 16) for a, b in zip(d[0::2], d[1::2])]  # change from d to CONVERSATION_ID
+    L = [int(a + b, 16) for a, b in zip(d[::2], d[1::2])]
 
     guidIn16Bytes = (ctypes.c_ubyte * 16)(*L)
 
     longnegoex = int(toHex("NEGOEXTS"), 16)
 
     authschem = '5c33530deaf90d4db2ec4ae3786ec308'
-    authsc = [int(a + b, 16) for a, b in zip(authschem[0::2], authschem[1::2])]  # change from d to AUTH_SCHEME
+    authsc = [int(a + b, 16) for a, b in zip(authschem[::2], authschem[1::2])]
     authschemIn16Bytes = (ctypes.c_ubyte * 16)(*authsc)
 
     signature = WST_MESSAGE_SIGNATURE(longnegoex)
@@ -332,25 +332,23 @@ def generateApRequest(): # same struct as meta data
                                  guidIn16Bytes
                                  )
 
-    exchange2 = WST_BYTE_VECTOR(64,  # should be ctypes.sizeof(header) + 8,
-                                int(len(data) / 2),
-                                0)
+    exchange2 = WST_BYTE_VECTOR(64, len(data) // 2, 0)
 
     exchangeMsg2 = WST_EXCHANGE_MESSAGE(header2,
                                         authschemIn16Bytes,
                                         exchange2)
 
-    header = WST_MESSAGE_HEADER(signature,
-                                5,
-                                2,
-                                ctypes.sizeof(header2) + 24,
-                                ctypes.sizeof(exchangeMsg2) + int(len(data) / 2),
-                                guidIn16Bytes
-                                )
+    header = WST_MESSAGE_HEADER(
+        signature,
+        5,
+        2,
+        ctypes.sizeof(header2) + 24,
+        ctypes.sizeof(exchangeMsg2) + len(data) // 2,
+        guidIn16Bytes,
+    )
 
-    exchange = WST_BYTE_VECTOR(ctypes.sizeof(header) + 24,
-                               int(len(data) / 2),
-                               0)
+
+    exchange = WST_BYTE_VECTOR(ctypes.sizeof(header) + 24, len(data) // 2, 0)
 
     ApRequestMsg = WST_EXCHANGE_MESSAGE(header,
                                        authschemIn16Bytes,
@@ -372,7 +370,7 @@ def splitStructs(data, nego):
             continue
         if struct.startswith("{0:0{1}x}".format(MessageTypes.CHALLENGE.value,2)):
             structData = str(toHex("NEGOEXTS")) + struct
-            
+
             exchange = Unpack(WST_EXCHANGE_MESSAGE, structData)._fields_[2][1]
             # exchange starts from header + authscheme (40 + 16)
             # then we calculate ExchangeByteCount, ExchangeOffset, ExchangePad

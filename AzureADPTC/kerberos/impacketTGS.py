@@ -32,20 +32,16 @@ from enum import Enum
 from AzureADPTC.NegoEx.Structs import LSAP_TOKEN_INFO_INTEGRITY, Pack, GenerateExtensions
 
 def sendReceive(data, host, kdcHost):
-    if kdcHost is None:
-        targetHost = host
-    else:
-        targetHost = kdcHost
-
+    targetHost = host if kdcHost is None else kdcHost
     messageLen = struct.pack('!i', len(data))
 
-    LOG.debug('Trying to connect to KDC at %s' % targetHost)
+    LOG.debug(f'Trying to connect to KDC at {targetHost}')
     try:
         af, socktype, proto, canonname, sa = socket.getaddrinfo(targetHost, 88, 0, socket.SOCK_STREAM)[0]
         s = socket.socket(af, socktype, proto)
         s.connect(sa)
     except socket.error as e:
-        raise socket.error("Connection error (%s:%s)" % (targetHost, 88), e)
+        raise socket.error(f"Connection error ({targetHost}:88)", e)
 
     s.sendall(messageLen + data)
 
@@ -125,7 +121,7 @@ If the value contains no realm, then default_realm will be used."""
             if isinstance(self.components, str):
                 self.components = [self.components]
         elif len(value) >= 2:
-            self.components = value[0:-1]
+            self.components = value[:-1]
             self.realm = value[-1]
         else:
             raise KerberosException("invalid principal value")
@@ -149,13 +145,19 @@ If the value contains no realm, then default_realm will be used."""
 
         ret = "/".join([quote_component(c) for c in self.components])
         if self.realm is not None:
-            ret += "@" + self.realm
+            ret += f"@{self.realm}"
 
         return ret
 
     def __repr__(self):
-        return "Principal((" + repr(self.components) + ", " + \
-               repr(self.realm) + "), t=" + str(self.type) + ")"
+        return (
+            (
+                (f"Principal(({repr(self.components)}, " + repr(self.realm))
+                + "), t="
+            )
+            + str(self.type)
+            + ")"
+        )
 
     def from_asn1(self, data, realm_component, name_component):
         name = data.getComponentByName(name_component)
@@ -218,7 +220,7 @@ class Ticket(object):
         return component
 
     def __str__(self):
-        return "<Ticket for %s vno %s>" % (str(self.service_principal), str(self.encrypted_part.kvno))
+        return f"<Ticket for {str(self.service_principal)} vno {str(self.encrypted_part.kvno)}>"
 
 
 def getKerberosTGS(cipher, sessionKey, tgtResponse, gssAPIChecksumBuffer):
@@ -226,7 +228,7 @@ def getKerberosTGS(cipher, sessionKey, tgtResponse, gssAPIChecksumBuffer):
     apReqNegoEx = SPNEGO_PKINIT()
     apReqNegoEx['kerberos-v5'] = '1.3.6.1.5.2.7'
     apReqNegoEx['null'] = univ.Boolean(True)
-    
+
     # Extract the ticket from the TGT
     ticket = Ticket() # should be -128 name-type
     ticket.from_asn1(tgtResponse['ticket'])
@@ -234,8 +236,7 @@ def getKerberosTGS(cipher, sessionKey, tgtResponse, gssAPIChecksumBuffer):
     apReqNegoEx['Kerberos']['ApReq']['pvno'] = 5
     apReqNegoEx['Kerberos']['ApReq']['msg-type'] = int(constants.ApplicationTagNumbers.AP_REQ.value)
 
-    opts = list()
-    opts.append( constants.KDCOptions.forwarded.value )
+    opts = [constants.KDCOptions.forwarded.value]
     apReqNegoEx['Kerberos']['ApReq']['ap-options'] =  constants.encodeFlags(opts)
     seq_set(apReqNegoEx['Kerberos']['ApReq'],'ticket', ticket.to_asn1)
 
@@ -245,7 +246,7 @@ def getKerberosTGS(cipher, sessionKey, tgtResponse, gssAPIChecksumBuffer):
 
     clientName = PrincipalModified()
     clientName.from_asn1( tgtResponse, 'crealm', 'cname')
-    
+
     seq_set(authenticator, 'cname', clientName.components_to_asn1)
 
     now = datetime.datetime.utcnow()
@@ -267,12 +268,12 @@ def getKerberosTGS(cipher, sessionKey, tgtResponse, gssAPIChecksumBuffer):
     kerbFinished = KRB_FINISHED()
     kerbFinished['gss-mic']['cksumtype'] = 16
     kerbFinished['gss-mic']['checksum'] = checksumtype.checksum(keyServer, 41, gssAPIChecksumBuffer.decode('hex'))
-    
+
     authenticator['cksum']['checksum'] = chkField.getData() + (GenerateExtensions(encoder.encode(kerbFinished).encode('hex'))).decode('hex')
-    
+
     authenticator['subkey']['keytype'] = 18
     authenticator['subkey']['keyvalue'] = subKey
-    
+
     authenticator['seq-number'] = 682437742
 
     tokenIntegrity = LSAP_TOKEN_INFO_INTEGRITY()
@@ -280,7 +281,7 @@ def getKerberosTGS(cipher, sessionKey, tgtResponse, gssAPIChecksumBuffer):
     tokenIntegrity.MachineID = '7e303fffe6bff25146addca4fbddf1b94f1634178eb4528fb2731c669ca23cde'.decode('hex')
     tokenIntegrity.TokenIL = int('2000', 16)
 
-    RESTRICTION_ENTRY = KERB_AD_RESTRICTION_ENTRYS()  
+    RESTRICTION_ENTRY = KERB_AD_RESTRICTION_ENTRYS()
     RESTRICTION_ENTRY[0]['restriction-type'] = 0 # const
     RESTRICTION_ENTRY[0]['restriction'] = Pack(tokenIntegrity).decode('hex')
 

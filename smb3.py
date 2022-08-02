@@ -53,8 +53,6 @@ try:
     rand = random.SystemRandom()
 except NotImplementedError:
     rand = random
-    pass
-
 # Structs to be used
 TREE_CONNECT = {
     'ShareName'       : '',
@@ -139,7 +137,10 @@ class SMB3:
         self.RequireMessageSigning = False    #
         self.ConnectionTable = {}
         self.GlobalFileTable = {}
-        self.ClientGuid = ''.join([random.choice(string.ascii_letters) for i in range(16)])
+        self.ClientGuid = ''.join(
+            [random.choice(string.ascii_letters) for _ in range(16)]
+        )
+
         # Only for SMB 3.0
         self.EncryptionAlgorithmList = ['AES-CCM']
         self.MaxDialect = []
@@ -239,11 +240,7 @@ class SMB3:
            self._Connection['ServerName'] = remote_name
 
         # This is on purpose. I'm still not convinced to do a socket.gethostname() if not specified
-        if my_name is None:
-            self._Connection['ClientName'] = ''
-        else:
-            self._Connection['ClientName'] = my_name
-
+        self._Connection['ClientName'] = '' if my_name is None else my_name
         if session is None:
             if not my_name:
                 # If destination port is 139 yes, there's some client disclosure
@@ -342,12 +339,11 @@ class SMB3:
 
     def signSMB(self, packet):
         packet['Signature'] = '\x00'*16
-        if self._Connection['Dialect'] == SMB2_DIALECT_21 or self._Connection['Dialect'] == SMB2_DIALECT_002:
-            if len(self._Session['SessionKey']) > 0:
+        if len(self._Session['SessionKey']) > 0:
+            if self._Connection['Dialect'] in [SMB2_DIALECT_21, SMB2_DIALECT_002]:
                 signature = hmac.new(self._Session['SessionKey'], packet.getData(), hashlib.sha256).digest()
                 packet['Signature'] = signature[:16]
-        else:
-            if len(self._Session['SessionKey']) > 0:
+            else:
                 p = packet.getData()
                 signature = crypto.AES_CMAC(self._Session['SigningKey'], p, len(p))
                 packet['Signature'] = signature
@@ -367,7 +363,7 @@ class SMB3:
         packet['SessionID'] = self._Session['SessionID']
 
         # Default the credit charge to 1 unless set by the caller
-        if ('CreditCharge' in packet.fields) is False:
+        if 'CreditCharge' not in packet.fields:
             packet['CreditCharge'] = 1
 
         # Standard credit request after negotiating protocol
@@ -377,7 +373,10 @@ class SMB3:
         messageId = packet['MessageID']
 
         if self._Session['SigningActivated'] is True and self._Connection['SequenceWindow'] > 2:
-            if packet['TreeID'] > 0 and (packet['TreeID'] in self._Session['TreeConnectTable']) is True:
+            if (
+                packet['TreeID'] > 0
+                and packet['TreeID'] in self._Session['TreeConnectTable']
+            ):
                 if self._Session['TreeConnectTable'][packet['TreeID']]['EncryptData'] is False:
                     packet['Flags'] = SMB2_FLAGS_SIGNED
                     self.signSMB(packet)
@@ -549,7 +548,7 @@ class SMB3:
         self._Connection['GSSNegotiateToken'] = negResp['Buffer']
         self._Connection['Dialect']           = negResp['DialectRevision']
         if (negResp['SecurityMode'] & SMB2_NEGOTIATE_SIGNING_REQUIRED) == SMB2_NEGOTIATE_SIGNING_REQUIRED or \
-                self._Connection['Dialect'] == SMB2_DIALECT_311:
+                    self._Connection['Dialect'] == SMB2_DIALECT_311:
             self._Connection['RequireSigning'] = True
         if self._Connection['Dialect'] == SMB2_DIALECT_311:
             # Always Sign

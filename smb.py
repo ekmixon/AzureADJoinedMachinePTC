@@ -504,23 +504,18 @@ class SessionError(Exception):
         return self.packet
 
     def __str__( self ):
-        error_class = SessionError.error_classes.get( self.error_class, None )
-        if not error_class:
-            error_code_str = self.error_code
-            error_class_str = self.error_class
-        else:
+        if error_class := SessionError.error_classes.get(self.error_class, None):
             error_class_str = error_class[0]
             error_code = error_class[1].get( self.error_code, None )
-            if not error_code:
-                error_code_str = self.error_code
-            else:
-                error_code_str = '%s(%s)' % error_code
-
+            error_code_str = '%s(%s)' % error_code if error_code else self.error_code
+        else:
+            error_code_str = self.error_code
+            error_class_str = self.error_class
         if self.nt_status:
             return 'SMB SessionError: %s(%s)' % nt_errors.ERROR_MESSAGES[self.error_code]
         else:
             # Fall back to the old format
-            return 'SMB SessionError: class: %s, code: %s' % (error_class_str, error_code_str)
+            return f'SMB SessionError: class: {error_class_str}, code: {error_code_str}'
 
 
 # Raised when an supported feature is present/required in the protocol but is not
@@ -545,7 +540,12 @@ class SharedDevice:
         return self.__comment
 
     def __repr__(self):
-        return '<SharedDevice instance: name=' + self.__name + ', type=' + str(self.__type) + ', comment="' + self.__comment + '">'
+        return (
+            f'<SharedDevice instance: name={self.__name}, type={str(self.__type)}'
+            + ', comment="'
+            + self.__comment
+            + '">'
+        )
 
 
 # Contains information about the shared file/directory
@@ -682,10 +682,10 @@ class NewSMBPacket(Structure):
     def __init__(self, **kargs):
         Structure.__init__(self, **kargs)
 
-        if ('Flags2' in self.fields) is False:
-             self['Flags2'] = 0
-        if ('Flags1' in self.fields) is False:
-             self['Flags1'] = 0
+        if 'Flags2' not in self.fields:
+            self['Flags2'] = 0
+        if 'Flags1' not in self.fields:
+            self['Flags1'] = 0
 
         if 'data' not in kargs:
             self['Data'] = []
@@ -706,17 +706,15 @@ class NewSMBPacket(Structure):
         return self['ErrorClass'] == 0x16 and self['ErrorCode'] == 0xc000
 
     def isValidAnswer(self, cmd):
-        # this was inside a loop reading more from the net (with recv_packet(None))
-        if self['Command'] == cmd:
-            if (self['ErrorClass'] == 0x00 and self['ErrorCode']  == 0x00):
-                    return 1
-            elif self.isMoreData():
-                return 1
-            elif self.isMoreProcessingRequired():
-                return 1
-            raise SessionError("SMB Library Error", self['ErrorClass'] + (self['_reserved'] << 8), self['ErrorCode'], self['Flags2'] & SMB.FLAGS2_NT_STATUS, self)
-        else:
+        if self['Command'] != cmd:
             raise UnsupportedFeature("Unexpected answer from server: Got %d, Expected %d" % (self['Command'], cmd))
+        if (self['ErrorClass'] == 0x00 and self['ErrorCode']  == 0x00):
+                return 1
+        elif self.isMoreData():
+            return 1
+        elif self.isMoreProcessingRequired():
+            return 1
+        raise SessionError("SMB Library Error", self['ErrorClass'] + (self['_reserved'] << 8), self['ErrorCode'], self['Flags2'] & SMB.FLAGS2_NT_STATUS, self)
 
 
 class SMBCommand(Structure):
@@ -1420,9 +1418,11 @@ class SMBSessionSetupAndX_Extended_Response_Data(AsciiOrUnicodeStructure):
         ('NativeLanMan','u=""'),
     )
     def getData(self):
-        if self.structure == self.UnicodeStructure:
-            if len(str(self['SecurityBlob'])) % 2 == 0:
-                self['Pad'] = '\x00'
+        if (
+            self.structure == self.UnicodeStructure
+            and len(str(self['SecurityBlob'])) % 2 == 0
+        ):
+            self['Pad'] = '\x00'
         return AsciiOrUnicodeStructure.getData(self)
 
 ############# SMB_COM_TREE_CONNECT (0x70)
@@ -2401,11 +2401,7 @@ class SMB(object):
         self.__flags1 = SMB.FLAGS1_PATHCASELESS | SMB.FLAGS1_CANONICALIZED_PATHS
         self.__flags2 = SMB.FLAGS2_EXTENDED_SECURITY | SMB.FLAGS2_NT_STATUS | SMB.FLAGS2_LONG_NAMES
 
-        if timeout is None:
-            self.__timeout = 60
-        else:
-            self.__timeout = timeout
-
+        self.__timeout = 60 if timeout is None else timeout
         # If port 445 and the name sent is *SMBSERVER we're setting the name to the IP.
         # This is to help some old applications still believing
         # *SMSBSERVER will work against modern OSes. If port is NETBIOS_SESSION_PORT the user better
@@ -2414,11 +2410,7 @@ class SMB(object):
            self.__remote_name = remote_host
 
         # This is on purpose. I'm still not convinced to do a socket.gethostname() if not specified
-        if my_name is None:
-            self.__client_name = b''
-        else:
-            self.__client_name = my_name
-
+        self.__client_name = b'' if my_name is None else my_name
         if session is None:
             if not my_name:
                 # If destination port is 139 yes, there's some client disclosure
@@ -2561,10 +2553,7 @@ class SMB(object):
         m.update( packet.getData() )
         # Replace sequence with acual hash
         packet['SecurityFeatures'] = m.digest()[:8]
-        if self._SignatureVerificationEnabled:
-           self._SignSequenceNumber +=1
-        else:
-           self._SignSequenceNumber +=2
+        self._SignSequenceNumber += 1 if self._SignatureVerificationEnabled else 2
 
     def checkSignSMB(self, packet, signingSessionKey, signingChallengeResponse):
         # Let's check
@@ -2593,13 +2582,12 @@ class SMB(object):
     def isValidAnswer(s, cmd):
         while 1:
             if s.rawData():
-                if s.get_command() == cmd:
-                    if s.get_error_class() == 0x00 and s.get_error_code() == 0x00:
-                        return 1
-                    else:
-                        raise SessionError( "SMB Library Error", s.get_error_class()+ (s.get_reserved() << 8), s.get_error_code() , s.get_flags2() & SMB.FLAGS2_NT_STATUS)
-                else:
+                if s.get_command() != cmd:
                     break
+                if s.get_error_class() == 0x00 and s.get_error_code() == 0x00:
+                    return 1
+                else:
+                    raise SessionError( "SMB Library Error", s.get_error_class()+ (s.get_reserved() << 8), s.get_error_code() , s.get_flags2() & SMB.FLAGS2_NT_STATUS)
         return 0
 
     def neg_session(self, extended_security = True, negPacket = None):
@@ -2663,11 +2651,9 @@ class SMB(object):
         LOG.warning("[MS-CIFS] This is an original Core Protocol command.This command has been deprecated.Client Implementations SHOULD use SMB_COM_TREE_CONNECT_ANDX")
 
         # return 0x800
-        if password:
-            # Password is only encrypted if the server passed us an "encryption" during protocol dialect
-            if self._dialects_parameters['ChallengeLength'] > 0:
-                # this code is untested
-                password = self.get_ntlmv1_response(ntlm.compute_lmhash(password))
+        if password and self._dialects_parameters['ChallengeLength'] > 0:
+            # this code is untested
+            password = self.get_ntlmv1_response(ntlm.compute_lmhash(password))
 
         if not unicode_support:
             if unicode_convert:

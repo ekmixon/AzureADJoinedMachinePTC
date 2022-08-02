@@ -575,11 +575,10 @@ class DCERPCException(Exception):
         key = self.error_code
         if self.error_string is not None:
             return self.error_string
-        if key in rpc_status_codes:
-            error_msg_short = rpc_status_codes[key]
-            return 'DCERPC Runtime Error: code: 0x%x - %s ' % (self.error_code, error_msg_short)
-        else:
+        if key not in rpc_status_codes:
             return 'DCERPC Runtime Error: unknown error code: 0x%x' % self.error_code
+        error_msg_short = rpc_status_codes[key]
+        return 'DCERPC Runtime Error: code: 0x%x - %s ' % (self.error_code, error_msg_short)
 
 # Context Item
 class CtxItem(Structure):
@@ -762,7 +761,7 @@ class MSRPCBindAck(MSRPCHeader):
         Structure.fromString(self,data)
         # Parse the ctx_items
         data = self['ctx_items']
-        for i in range(self['ctx_num']):
+        for _ in range(self['ctx_num']):
             item = CtxItemResult(data)
             self.__ctx_items.append(item)
             data = data[len(item):]
@@ -858,7 +857,7 @@ class DCERPC:
 
         __import__(request.__module__)
         module = sys.modules[request.__module__]
-        respClass = getattr(module, request.__class__.__name__ + 'Response')
+        respClass = getattr(module, f'{request.__class__.__name__}Response')
 
         if  answer[-4:] != b'\x00\x00\x00\x00' and checkError is True:
             error_code = unpack('<L', answer[-4:])[0]
@@ -899,7 +898,7 @@ class DCERPC_v5(DCERPC):
         self.__aesKey = ''
         self.__TGT    = None
         self.__TGS    = None
-        
+
         self.__clientSigningKey = b''
         self.__serverSigningKey = b''
         self.__clientSealingKey = b''
@@ -950,16 +949,15 @@ class DCERPC_v5(DCERPC):
         self.__TGS      = TGS
         if lmhash != '' or nthash != '':
             if len(lmhash) % 2:
-                lmhash = '0%s' % lmhash
+                lmhash = f'0{lmhash}'
             if len(nthash) % 2:
-                nthash = '0%s' % nthash
+                nthash = f'0{nthash}'
             try: # just in case they were converted already
                 self.__lmhash = unhexlify(lmhash)
                 self.__nthash = unhexlify(nthash)
             except:
                 self.__lmhash = lmhash
                 self.__nthash = nthash
-                pass
 
     def bind(self, iface_uuid, alter = 0, bogus_binds = 0, transfer_syntax = ('8a885d04-1ceb-11c9-9fe8-08002b104860', '2.0')):
         bind = MSRPCBind()

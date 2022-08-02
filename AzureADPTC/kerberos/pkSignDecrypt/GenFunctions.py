@@ -61,9 +61,9 @@ class ApiProxy(object):
         # Give access to the 'ApiProxy' object from the function
         python_proxy.proxy = self
         params_name = [param[1] for param in params]
-        if (self.error_check.__doc__):
+        if self.error_check.__doc__:
             doc = python_proxy.__doc__
-            doc = doc if doc else ""
+            doc = doc or ""
             python_proxy.__doc__ = doc + "\nErrcheck:\n   " + self.error_check.__doc__
 
         def generate_ctypes_function():

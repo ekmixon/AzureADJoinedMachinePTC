@@ -25,18 +25,27 @@ from impacket.smb3structs import FILE_WRITE_DATA, FILE_DIRECTORY_FILE
 class ServiceInstall:
     def __init__(self, SMBObject, exeFile, serviceName='', binary_service_name=None):
         self._rpctransport = 0
-        self.__service_name = serviceName if len(serviceName) > 0  else  ''.join([random.choice(string.ascii_letters) for i in range(4)])
+        self.__service_name = (
+            serviceName
+            if len(serviceName) > 0
+            else ''.join([random.choice(string.ascii_letters) for _ in range(4)])
+        )
+
 
         if binary_service_name is None:
-            self.__binary_service_name = ''.join([random.choice(string.ascii_letters) for i in range(8)]) + '.exe'
+            self.__binary_service_name = (
+                ''.join([random.choice(string.ascii_letters) for _ in range(8)])
+                + '.exe'
+            )
+
         else:
             self.__binary_service_name = binary_service_name
-            
+
         self.__exeFile = exeFile
 
         # We might receive two different types of objects, always end up
         # with a SMBConnection one
-        if isinstance(SMBObject, smb.SMB) or isinstance(SMBObject, smb3.SMB3):
+        if isinstance(SMBObject, (smb.SMB, smb3.SMB3)):
             self.connection = SMBConnection(existingConnection = SMBObject)
         else:
             self.connection = SMBObject
@@ -48,7 +57,7 @@ class ServiceInstall:
 
     def getShares(self):
         # Setup up a DCE SMBTransport with the connection already in place
-        LOG.info("Requesting shares on %s....." % (self.connection.getRemoteHost()))
+        LOG.info(f"Requesting shares on {self.connection.getRemoteHost()}.....")
         try:
             self._rpctransport = transport.SMBTransport(self.connection.getRemoteHost(),
                                                         self.connection.getRemoteHost(),filename = r'\srvsvc',
@@ -60,21 +69,24 @@ class ServiceInstall:
             resp = srvs.hNetrShareEnum(dce_srvs, 1)
             return resp['InfoStruct']['ShareInfo']['Level1']
         except:
-            LOG.critical("Error requesting shares on %s, aborting....." % (self.connection.getRemoteHost()))
+            LOG.critical(
+                f"Error requesting shares on {self.connection.getRemoteHost()}, aborting....."
+            )
+
             raise
 
 
     def createService(self, handle, share, path):
-        LOG.info("Creating service %s on %s....." % (self.__service_name, self.connection.getRemoteHost()))
+        LOG.info(
+            f"Creating service {self.__service_name} on {self.connection.getRemoteHost()}....."
+        )
+
 
         # First we try to open the service in case it exists. If it does, we remove it.
         try:
             resp =  scmr.hROpenServiceW(self.rpcsvc, handle, self.__service_name+'\x00')
         except Exception as e:
-            if str(e).find('ERROR_SERVICE_DOES_NOT_EXIST') >= 0:
-                # We're good, pass the exception
-                pass
-            else:
+            if str(e).find('ERROR_SERVICE_DOES_NOT_EXIST') < 0:
                 raise e
         else:
             # It exists, remove it
@@ -87,13 +99,16 @@ class ServiceInstall:
             resp = scmr.hRCreateServiceW(self.rpcsvc, handle,self.__service_name + '\x00', self.__service_name + '\x00',
                                          lpBinaryPathName=command + '\x00', dwStartType=scmr.SERVICE_DEMAND_START)
         except:
-            LOG.critical("Error creating service %s on %s" % (self.__service_name, self.connection.getRemoteHost()))
+            LOG.critical(
+                f"Error creating service {self.__service_name} on {self.connection.getRemoteHost()}"
+            )
+
             raise
         else:
             return resp['lpServiceHandle']
 
     def openSvcManager(self):
-        LOG.info("Opening SVCManager on %s....." % self.connection.getRemoteHost())
+        LOG.info(f"Opening SVCManager on {self.connection.getRemoteHost()}.....")
         # Setup up a DCE SMBTransport with the connection already in place
         self._rpctransport = transport.SMBTransport(self.connection.getRemoteHost(), self.connection.getRemoteHost(),
                                                     filename = r'\svcctl', smb_connection = self.connection)
@@ -103,25 +118,23 @@ class ServiceInstall:
         try:
             resp = scmr.hROpenSCManagerW(self.rpcsvc)
         except:
-            LOG.critical("Error opening SVCManager on %s....." % self.connection.getRemoteHost())
+            LOG.critical(
+                f"Error opening SVCManager on {self.connection.getRemoteHost()}....."
+            )
+
             raise Exception('Unable to open SVCManager')
         else:
             return resp['lpScHandle']
 
     def copy_file(self, src, tree, dst):
-        LOG.info("Uploading file %s" % dst)
-        if isinstance(src, str):
-            # We have a filename
-            fh = open(src, 'rb')
-        else:
-            # We have a class instance, it must have a read method
-            fh = src
+        LOG.info(f"Uploading file {dst}")
+        fh = open(src, 'rb') if isinstance(src, str) else src
         f = dst
         pathname = f.replace('/','\\')
         try:
             self.connection.putFile(tree, pathname, fh.read)
         except:
-            LOG.critical("Error uploading file %s, aborting....." % dst)
+            LOG.critical(f"Error uploading file {dst}, aborting.....")
             raise
         fh.close()
 
@@ -129,23 +142,22 @@ class ServiceInstall:
         # Check we can write a file on the shares, stop in the first one
         writeableShare = None
         for i in shares['Buffer']:
-            if i['shi1_type'] == srvs.STYPE_DISKTREE or i['shi1_type'] == srvs.STYPE_SPECIAL:
-               share = i['shi1_netname'][:-1]
-               tid = 0
-               try:
-                   tid = self.connection.connectTree(share)
-                   self.connection.openFile(tid, '\\', FILE_WRITE_DATA, creationOption=FILE_DIRECTORY_FILE)
-               except:
-                   LOG.debug('Exception', exc_info=True)
-                   LOG.critical("share '%s' is not writable." % share)
-                   pass
-               else:
-                   LOG.info('Found writable share %s' % share)
-                   writeableShare = str(share)
-                   break
-               finally:
-                   if tid != 0:
-                       self.connection.disconnectTree(tid)
+            if i['shi1_type'] in [srvs.STYPE_DISKTREE, srvs.STYPE_SPECIAL]:
+                share = i['shi1_netname'][:-1]
+                tid = 0
+                try:
+                    tid = self.connection.connectTree(share)
+                    self.connection.openFile(tid, '\\', FILE_WRITE_DATA, creationOption=FILE_DIRECTORY_FILE)
+                except:
+                    LOG.debug('Exception', exc_info=True)
+                    LOG.critical("share '%s' is not writable." % share)
+                else:
+                    LOG.info(f'Found writable share {share}')
+                    writeableShare = str(share)
+                    break
+                finally:
+                    if tid != 0:
+                        self.connection.disconnectTree(tid)
         return writeableShare
 
     def install(self):
@@ -170,16 +182,15 @@ class ServiceInstall:
                     serverName = self.connection.getServerName()
                     if self.share.lower() == 'admin$':
                         path = '%systemroot%'
+                    elif serverName == '':
+                        path = '\\\\127.0.0.1\\' + self.share
                     else:
-                        if serverName != '':
-                           path = '\\\\%s\\%s' % (serverName, self.share)
-                        else:
-                           path = '\\\\127.0.0.1\\' + self.share
+                        path = '\\\\%s\\%s' % (serverName, self.share)
                     service = self.createService(svcManager, self.share, path)
                     serviceCreated = True
                     if service != 0:
                         # Start service
-                        LOG.info('Starting service %s.....' % self.__service_name)
+                        LOG.info(f'Starting service {self.__service_name}.....')
                         try:
                             scmr.hRStartServiceW(self.rpcsvc, service)
                         except:
@@ -188,18 +199,18 @@ class ServiceInstall:
                     scmr.hRCloseServiceHandle(self.rpcsvc, svcManager)
                     return True
             except Exception as e:
-                LOG.critical("Error performing the installation, cleaning up: %s" %e)
+                LOG.critical(f"Error performing the installation, cleaning up: {e}")
                 LOG.debug("Exception", exc_info=True)
                 try:
                     scmr.hRControlService(self.rpcsvc, service, scmr.SERVICE_CONTROL_STOP)
                 except:
                     pass
-                if fileCopied is True:
+                if fileCopied:
                     try:
                         self.connection.deleteFile(self.share, self.__binary_service_name)
                     except:
                         pass
-                if serviceCreated is True:
+                if serviceCreated:
                     try:
                         scmr.hRDeleteService(self.rpcsvc, service)
                     except:
@@ -216,16 +227,16 @@ class ServiceInstall:
             if svcManager != 0:
                 resp = scmr.hROpenServiceW(self.rpcsvc, svcManager, self.__service_name+'\x00')
                 service = resp['lpServiceHandle']
-                LOG.info('Stopping service %s.....' % self.__service_name)
+                LOG.info(f'Stopping service {self.__service_name}.....')
                 try:
                     scmr.hRControlService(self.rpcsvc, service, scmr.SERVICE_CONTROL_STOP)
                 except:
                     pass
-                LOG.info('Removing service %s.....' % self.__service_name)
+                LOG.info(f'Removing service {self.__service_name}.....')
                 scmr.hRDeleteService(self.rpcsvc, service)
                 scmr.hRCloseServiceHandle(self.rpcsvc, service)
                 scmr.hRCloseServiceHandle(self.rpcsvc, svcManager)
-            LOG.info('Removing file %s.....' % self.__binary_service_name)
+            LOG.info(f'Removing file {self.__binary_service_name}.....')
             self.connection.deleteFile(self.share, self.__binary_service_name)
         except Exception:
             LOG.critical("Error performing the uninstallation, cleaning up" )
@@ -233,7 +244,7 @@ class ServiceInstall:
                 scmr.hRControlService(self.rpcsvc, service, scmr.SERVICE_CONTROL_STOP)
             except:
                 pass
-            if fileCopied is True:
+            if fileCopied:
                 try:
                     self.connection.deleteFile(self.share, self.__binary_service_name)
                 except:
@@ -241,8 +252,7 @@ class ServiceInstall:
                         self.connection.deleteFile(self.share, self.__binary_service_name)
                     except:
                         pass
-                    pass
-            if serviceCreated is True:
+            if serviceCreated:
                 try:
                     scmr.hRDeleteService(self.rpcsvc, service)
                 except:

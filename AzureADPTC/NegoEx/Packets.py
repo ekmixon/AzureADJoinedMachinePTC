@@ -10,7 +10,7 @@ from impacket.krb5.constants import KERB_NON_KERB_CKSUM_SALT, ChecksumTypes
 def generateRandom(stringLength=32):
     letters = string.ascii_lowercase
     numbers = ''.join(str(i) for i in range(10))
-    return ''.join(random.choice(letters + numbers) for i in range(stringLength))
+    return ''.join(random.choice(letters + numbers) for _ in range(stringLength))
 
 toHex = lambda x: "".join([hex(ord(c))[2:].zfill(2) for c in x])
 
@@ -20,9 +20,17 @@ class Negoex:
         self.authscheme = '5c33530deaf90d4db2ec4ae3786ec308'
         self.random = generateRandom().encode('utf-8').encode('hex')
         self.negoexHeader = int(toHex("NEGOEXTS"),16)
-        PconvId = [int(a+b,16) for a,b in zip(self.conversation_id[0::2],self.conversation_id[1::2])]
-        PauthScheme = [int(a + b, 16) for a, b in zip(self.authscheme[0::2], self.authscheme[1::2])]
-        Prandom = [int(a + b, 16) for a, b in zip(self.random[0::2], self.random[1::2])]
+        PconvId = [
+            int(a + b, 16)
+            for a, b in zip(self.conversation_id[::2], self.conversation_id[1::2])
+        ]
+
+        PauthScheme = [
+            int(a + b, 16)
+            for a, b in zip(self.authscheme[::2], self.authscheme[1::2])
+        ]
+
+        Prandom = [int(a + b, 16) for a, b in zip(self.random[::2], self.random[1::2])]
         self.convId16Byte = (ctypes.c_ubyte * 16)(*PconvId)
         self.authScheme16Byte = (ctypes.c_ubyte * 16)(*PauthScheme)
         self.random32Byte = (ctypes.c_ubyte * 32)(*Prandom)
@@ -68,26 +76,24 @@ class Negoex:
                                      207,  # should be 112,  # should be calculated as all initiator nego
                                      self.convId16Byte
                                      )
-        
-        exchange2 = WST_BYTE_VECTOR(64,  # should be ctypes.sizeof(header) + 8,
-                                    int(len(data) / 2),
-                                    0)
+
+        exchange2 = WST_BYTE_VECTOR(64, len(data) // 2, 0)
 
         exchangeMsg2 = WST_EXCHANGE_MESSAGE(header2,
                                             self.authScheme16Byte,
                                             exchange2)
 
-        header = WST_MESSAGE_HEADER(signature,
-                                    WST_MESSAGE_TYPE.WST_MESSAGE_TYPE_CLIENT_META_DATA.value,
-                                    self.sequenceNum,
-                                    ctypes.sizeof(header2) + 24,
-                                    ctypes.sizeof(exchangeMsg2) + int(len(data) / 2),
-                                    self.convId16Byte
-                                    )
+        header = WST_MESSAGE_HEADER(
+            signature,
+            WST_MESSAGE_TYPE.WST_MESSAGE_TYPE_CLIENT_META_DATA.value,
+            self.sequenceNum,
+            ctypes.sizeof(header2) + 24,
+            ctypes.sizeof(exchangeMsg2) + len(data) // 2,
+            self.convId16Byte,
+        )
 
-        exchange = WST_BYTE_VECTOR(ctypes.sizeof(header) + 24,
-                                   int(len(data) / 2),
-                                   0)
+
+        exchange = WST_BYTE_VECTOR(ctypes.sizeof(header) + 24, len(data) // 2, 0)
 
         exchangeMsg = WST_EXCHANGE_MESSAGE(header,
                                            self.authScheme16Byte,
@@ -106,26 +112,24 @@ class Negoex:
                                      0,
                                      self.convId16Byte
                                      )
-        
-        exchange2 = WST_BYTE_VECTOR(64,  # should be ctypes.sizeof(header) + 8,
-                                    int(len(data) / 2),
-                                    0)
+
+        exchange2 = WST_BYTE_VECTOR(64, len(data) // 2, 0)
 
         exchangeMsg2 = WST_EXCHANGE_MESSAGE(header2,
                                             self.authScheme16Byte,
                                             exchange2)
 
-        header = WST_MESSAGE_HEADER(signature,
-                                    WST_MESSAGE_TYPE.WST_MESSAGE_TYPE_AP_REQUEST.value,
-                                    self.sequenceNum,
-                                    ctypes.sizeof(header2) + 24,
-                                    ctypes.sizeof(exchangeMsg2) + int(len(data) / 2),
-                                    self.convId16Byte
-                                    )
+        header = WST_MESSAGE_HEADER(
+            signature,
+            WST_MESSAGE_TYPE.WST_MESSAGE_TYPE_AP_REQUEST.value,
+            self.sequenceNum,
+            ctypes.sizeof(header2) + 24,
+            ctypes.sizeof(exchangeMsg2) + len(data) // 2,
+            self.convId16Byte,
+        )
 
-        exchange = WST_BYTE_VECTOR(ctypes.sizeof(header) + 24,
-                                   int(len(data) / 2),
-                                   0)
+
+        exchange = WST_BYTE_VECTOR(ctypes.sizeof(header) + 24, len(data) // 2, 0)
 
         ApRequestMsg = WST_EXCHANGE_MESSAGE(header,
                                             self.authScheme16Byte,

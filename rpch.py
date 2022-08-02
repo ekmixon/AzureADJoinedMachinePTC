@@ -41,20 +41,18 @@ class RPCProxyClientException(DCERPCException):
                 search = self.parser.search(proxy_error)
                 rpc_error_code = int(search.group(1), 16)
             except:
-                error_string += ': ' + proxy_error
+                error_string += f': {proxy_error}'
 
         DCERPCException.__init__(self, error_string, rpc_error_code)
 
     def __str__(self):
-        if self.error_code is not None:
-            key = self.error_code
-            if key in system_errors.ERROR_MESSAGES:
-                error_msg_short = system_errors.ERROR_MESSAGES[key][0]
-                return '%s, code: 0x%x - %s ' % (self.error_string, self.error_code, error_msg_short)
-            else:
-                return '%s: unknown code: 0x%x' % (self.error_string, self.error_code)
-        else:
+        if self.error_code is None:
             return self.error_string
+        key = self.error_code
+        if key not in system_errors.ERROR_MESSAGES:
+            return '%s: unknown code: 0x%x' % (self.error_string, self.error_code)
+        error_msg_short = system_errors.ERROR_MESSAGES[key][0]
+        return '%s, code: 0x%x - %s ' % (self.error_string, self.error_code, error_msg_short)
 
 ################################################################################
 # CONSTANTS
@@ -335,16 +333,15 @@ class RPCProxyClient:
         self.__domain   = domain
         if lmhash != '' or nthash != '':
             if len(lmhash) % 2:
-                lmhash = '0%s' % lmhash
+                lmhash = f'0{lmhash}'
             if len(nthash) % 2:
-                nthash = '0%s' % nthash
+                nthash = f'0{nthash}'
             try: # just in case they were converted already
                 self.__lmhash = binascii.unhexlify(lmhash)
                 self.__nthash = binascii.unhexlify(nthash)
             except:
                 self.__lmhash = lmhash
                 self.__nthash = nthash
-                pass
 
     def get_ntlmssp_info(self):
         return self.__ntlmssp_info
@@ -386,16 +383,28 @@ class RPCProxyClient:
                                   % (res.status, self._rpcProxyUrl.path))
 
         if res.getheader('WWW-Authenticate') is None:
-            raise RPCProxyClientException('No authentication requested by the server for url %s' % self._rpcProxyUrl.path)
+            raise RPCProxyClientException(
+                f'No authentication requested by the server for url {self._rpcProxyUrl.path}'
+            )
+
 
         if 'NTLM' not in res.getheader('WWW-Authenticate'):
-            raise RPCProxyClientException('NTLM Auth not offered by URL, offered protocols: %s' % res.getheader('WWW-Authenticate'))
+            raise RPCProxyClientException(
+                f"NTLM Auth not offered by URL, offered protocols: {res.getheader('WWW-Authenticate')}"
+            )
+
 
         try:
-            serverChallengeBase64 = re.search('NTLM ([a-zA-Z0-9+/]+={0,2})', res.getheader('WWW-Authenticate')).group(1)
+            serverChallengeBase64 = re.search(
+                'NTLM ([a-zA-Z0-9+/]+={0,2})', res.getheader('WWW-Authenticate')
+            )[1]
+
             serverChallenge = base64.b64decode(serverChallengeBase64)
         except (IndexError, KeyError, AttributeError):
-            raise RPCProxyClientException('No NTLM challenge returned from server for url %s' % self._rpcProxyUrl.path)
+            raise RPCProxyClientException(
+                f'No NTLM challenge returned from server for url {self._rpcProxyUrl.path}'
+            )
+
 
         # Default ACL in HKLM\SOFTWARE\Microsoft\Rpc\ValidPorts allows connections only by NetBIOS name of the server.
         # If remoteName is empty we assume the target is the rpcproxy server, and get its NetBIOS name from NTLMSSP.
@@ -410,7 +419,7 @@ class RPCProxyClient:
             self._stringbinding.set_network_address(self.__remoteName)
 
         if not self._rpcProxyUrl.query:
-            query = self.__remoteName + ':' + str(self.__dstport)
+            query = f'{self.__remoteName}:{str(self.__dstport)}'
             self._rpcProxyUrl = self._rpcProxyUrl._replace(query=query)
 
         type3, exportedSessionKey = ntlm.getNTLMSSPType3(auth, serverChallenge, self.__username, self.__password,
@@ -418,16 +427,27 @@ class RPCProxyClient:
 
         headers['Authorization']  = b'NTLM ' + base64.b64encode(type3.getData())
 
-        self.__channels[method].request(method, self._rpcProxyUrl.path + '?' + self._rpcProxyUrl.query, headers=headers)
+        self.__channels[method].request(
+            method,
+            f'{self._rpcProxyUrl.path}?{self._rpcProxyUrl.query}',
+            headers=headers,
+        )
+
 
         auth_resp = self.__channels[method].sock.recv(8192)
 
         if auth_resp != b'HTTP/1.1 100 Continue\r\n\r\n':
             try:
                 auth_resp = auth_resp.split(b'\r\n')[0].decode("utf-8", errors='replace')
-                raise RPCProxyClientException('RPC Proxy authentication failed in %s channel' % method, proxy_error=auth_resp)
+                raise RPCProxyClientException(
+                    f'RPC Proxy authentication failed in {method} channel',
+                    proxy_error=auth_resp,
+                )
+
             except (IndexError, KeyError, AttributeError):
-                raise RPCProxyClientException('RPC Proxy authentication failed in %s channel' % method)
+                raise RPCProxyClientException(
+                    f'RPC Proxy authentication failed in {method} channel'
+                )
 
     def create_tunnel(self):
         # 3.2.1.5.3.1 Connection Establishment
@@ -452,10 +472,7 @@ class RPCProxyClient:
         resp_body = resp[resp.find(b'\r\n\r\n') + 4:]
 
         # Recieving CONN/A3
-        if len(resp_body) > 0:
-            # CONN/A3 is already received
-            pass
-        else:
+        if len(resp_body) <= 0:
             conn_a3_rpc = self.recv()
 
         # Recieving and parsing CONN/C2
@@ -486,14 +503,13 @@ class RPCProxyClient:
 
         if self.__serverChunked is False:
             return buffer
-        else:
-            chunksize = int(buffer[:buffer.find(b'\r\n')], 16)
-            buffer = buffer[buffer.find(b'\r\n') + 2:]
+        chunksize = int(buffer[:buffer.find(b'\r\n')], 16)
+        buffer = buffer[buffer.find(b'\r\n') + 2:]
 
-            while len(buffer) - 2 < chunksize:
-                buffer += sock.recv(chunksize - len(buffer) + 2)
+        while len(buffer) - 2 < chunksize:
+            buffer += sock.recv(chunksize - len(buffer) + 2)
 
-            return buffer[:-2]
+        return buffer[:-2]
 
     def send(self, data, forceWriteAndx=0, forceRecv=0):
         sock_in = self.get_socket_in()

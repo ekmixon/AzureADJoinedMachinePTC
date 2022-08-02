@@ -50,9 +50,6 @@ class EncryptedContent(univ.OctetString):
     pass
 
 
-contentTypeMap = {}
-
-
 class EncryptedContentInfo(univ.Sequence):
     componentType = namedtype.NamedTypes(
         namedtype.NamedType('contentType', ContentType()),
@@ -286,4 +283,4 @@ _contentTypeMapUpdate = {
     encryptedData: EncryptedData()
 }
 
-contentTypeMap.update(_contentTypeMapUpdate)
+contentTypeMap = {} | _contentTypeMapUpdate

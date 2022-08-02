@@ -57,17 +57,22 @@ def decrypt_msg(pfxFile, pfxPass, data):
                     output.value = ctypes.cast(
                         ctypes.pointer(ctypes.create_string_buffer(pointerDOutputLen.contents.value)),
                         ctypes.POINTER(ctypes.c_ubyte))
-                    status = winproxy.CryptMsgGetParam(hCryptMsg, gdef.CMSG_CONTENT_PARAM, 0, None, pointerDOutputLen)
-                    if not status:
-                        print("CryptMsgGetParam Error")
-
-                    else:
+                    if status := winproxy.CryptMsgGetParam(
+                        hCryptMsg,
+                        gdef.CMSG_CONTENT_PARAM,
+                        0,
+                        None,
+                        pointerDOutputLen,
+                    ):
                         output.value = ctypes.cast(
                             ctypes.pointer(ctypes.create_string_buffer(pointerDOutputLen.contents.value)),
                             ctypes.POINTER(ctypes.c_ubyte))
                         if winproxy.CryptMsgGetParam(hCryptMsg, gdef.CMSG_CONTENT_PARAM, 0, output.value,
                                                      pointerDOutputLen):
                             return get_msg(ctypes.pointer(output))
+                    else:
+                        print("CryptMsgGetParam Error")
+
                 else:
                     print("CryptMsgGetParam Error")
 
@@ -80,10 +85,14 @@ def decrypt_msg(pfxFile, pfxPass, data):
 
 def get_msg(input):
     x = ctypes.c_ulong()
-    hCryptMsg = winproxy.CryptMsgOpenToDecode(gdef.X509_ASN_ENCODING | gdef.PKCS_7_ASN_ENCODING,
-                                              0, 0, ctypes.pointer(x),
-                                              None, None)
-    if hCryptMsg:
+    if hCryptMsg := winproxy.CryptMsgOpenToDecode(
+        gdef.X509_ASN_ENCODING | gdef.PKCS_7_ASN_ENCODING,
+        0,
+        0,
+        ctypes.pointer(x),
+        None,
+        None,
+    ):
         if winproxy.CryptMsgUpdate(hCryptMsg, input.contents.value, input.contents.length, True):
             output = OCTET()
             output.length = gdef.c_uint(0)
@@ -98,7 +107,6 @@ def get_msg(input):
                     print("CryptMsgGetParam Error")
                 else:
                     outData = output._objects['1']['1'].raw
-                    data = outData.encode('hex')
-                    return data
+                    return outData.encode('hex')
 
     return status

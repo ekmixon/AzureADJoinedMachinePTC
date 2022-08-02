@@ -38,10 +38,9 @@ class DCERPCStringBinding:
         self.__uuid = match.group(1)
         self.__ps = match.group(2)
         self.__na = match.group(3)
-        options = match.group(4)
-        if options:
+        if options := match.group(4):
             options = options.split(',')
-            
+
             self.__endpoint = options[0]
             try:
                 self.__endpoint.index('endpoint=')
@@ -90,14 +89,20 @@ class DCERPCStringBinding:
 def DCERPCStringBindingCompose(uuid=None, protocol_sequence='', network_address='', endpoint='', options={}):
     s = ''
     if uuid:
-        s += uuid + '@'
-    s += protocol_sequence + ':'
+        s += f'{uuid}@'
+    s += f'{protocol_sequence}:'
     if network_address:
         s += network_address
     if endpoint or options:
-        s += '[' + endpoint
+        s += f'[{endpoint}'
         if options:
-            s += ',' + ','.join([key if str(val) == '' else "=".join([key, str(val)]) for key, val in options.items()])
+            s += ',' + ','.join(
+                [
+                    "=".join([key, str(val)]) if str(val) else key
+                    for key, val in options.items()
+                ]
+            )
+
         s += ']'
 
     return s
@@ -107,32 +112,28 @@ def DCERPCTransportFactory(stringbinding):
 
     na = sb.get_network_address()
     ps = sb.get_protocol_sequence()
-    if 'ncadg_ip_udp' == ps:
-        port = sb.get_endpoint()
-        if port:
+    if ps == 'ncadg_ip_udp':
+        if port := sb.get_endpoint():
             rpctransport = UDPTransport(na, int(port))
         else:
             rpctransport = UDPTransport(na)
-    elif 'ncacn_ip_tcp' == ps:
-        port = sb.get_endpoint()
-        if port:
+    elif ps == 'ncacn_ip_tcp':
+        if port := sb.get_endpoint():
             rpctransport = TCPTransport(na, int(port))
         else:
             rpctransport = TCPTransport(na)
-    elif 'ncacn_http' == ps:
-        port = sb.get_endpoint()
-        if port:
+    elif ps == 'ncacn_http':
+        if port := sb.get_endpoint():
             rpctransport = HTTPTransport(na, int(port))
         else:
             rpctransport = HTTPTransport(na)
-    elif 'ncacn_np' == ps:
-        named_pipe = sb.get_endpoint()
-        if named_pipe:
+    elif ps == 'ncacn_np':
+        if named_pipe := sb.get_endpoint():
             named_pipe = named_pipe[len(r'\pipe'):]
             rpctransport = SMBTransport(na, filename = named_pipe)
         else:
             rpctransport = SMBTransport(na)
-    elif 'ncalocal' == ps:
+    elif ps == 'ncalocal':
         named_pipe = sb.get_endpoint()
         rpctransport = LOCALTransport(filename = named_pipe)
     else:
@@ -168,7 +169,7 @@ class DCERPCTransport:
         # changed from original impacket
         self._userCert = None
         self._certPass = None
-        
+
         self.set_credentials('','')
         # Strict host validation - off by default and currently only for
         # SMBTransport
@@ -279,16 +280,15 @@ class DCERPCTransport:
         self._TGS      = TGS
         if lmhash != '' or nthash != '':
             if len(lmhash) % 2:
-                lmhash = '0%s' % lmhash
+                lmhash = f'0{lmhash}'
             if len(nthash) % 2:
-                nthash = '0%s' % nthash
+                nthash = f'0{nthash}'
             try: # just in case they were converted already
-               self._lmhash = binascii.unhexlify(lmhash)
-               self._nthash = binascii.unhexlify(nthash)
+                self._lmhash = binascii.unhexlify(lmhash)
+                self._nthash = binascii.unhexlify(nthash)
             except:
-               self._lmhash = lmhash
-               self._nthash = nthash
-               pass
+                self._lmhash = lmhash
+                self._nthash = nthash
 
     # changed from original impacket
     def set_certificate(self, userCert, certPass):
@@ -320,7 +320,7 @@ class UDPTransport(DCERPCTransport):
             self.__socket.settimeout(self.get_connect_timeout())
         except socket.error as msg:
             self.__socket = None
-            raise DCERPCException("Could not connect: %s" % msg)
+            raise DCERPCException(f"Could not connect: {msg}")
 
         return 1
 
@@ -361,7 +361,7 @@ class TCPTransport(DCERPCTransport):
             self.__socket.connect(sa)
         except socket.error as msg:
             self.__socket.close()
-            raise DCERPCException("Could not connect: %s" % msg)
+            raise DCERPCException(f"Could not connect: {msg}")
         return 1
 
     def disconnect(self):
@@ -430,9 +430,9 @@ class HTTPTransport(TCPTransport, RPCProxyClient):
             rpcproxy = self._stringbinding.get_option("RpcProxy").split(":")
 
             if rpcproxy[1] == '443':
-                self.set_rpc_proxy_url('https://%s/rpc/rpcproxy.dll' % rpcproxy[0])
+                self.set_rpc_proxy_url(f'https://{rpcproxy[0]}/rpc/rpcproxy.dll')
             elif rpcproxy[1] == '80':
-                self.set_rpc_proxy_url('http://%s/rpc/rpcproxy.dll' % rpcproxy[0])
+                self.set_rpc_proxy_url(f'http://{rpcproxy[0]}/rpc/rpcproxy.dll')
             else:
                 # 2.1.2.1
                 # RPC over HTTP always uses port 80 for HTTP traffic and port 443 for HTTPS traffic.
@@ -453,7 +453,10 @@ class HTTPTransport(TCPTransport, RPCProxyClient):
             data = self.get_socket().recv(8192)
 
             if data != b'ncacn_http/1.0':
-                raise DCERPCException("%s:%s service is not ncacn_http" % (self.__remoteName, self.__dstport))
+                raise DCERPCException(
+                    f"{self.__remoteName}:{self.__dstport} service is not ncacn_http"
+                )
+
         else:
             RPCProxyClient.connect(self)
 
@@ -560,14 +563,13 @@ class SMBTransport(DCERPCTransport):
             self.__pending_recv += 1
 
     def recv(self, forceRecv = 0, count = 0 ):
-        if self._max_send_frag or self.__pending_recv:
-            # _max_send_frag is checked because it's the same condition we checked
-            # to decide whether to use write_andx() or send_trans() in send() above.
-            if self.__pending_recv:
-                self.__pending_recv -= 1
-            return self.__smb_connection.readFile(self.__tid, self.__handle, bytesToRead = self._max_recv_frag)
-        else:
+        if not self._max_send_frag and not self.__pending_recv:
             return self.__smb_connection.readFile(self.__tid, self.__handle)
+        # _max_send_frag is checked because it's the same condition we checked
+        # to decide whether to use write_andx() or send_trans() in send() above.
+        if self.__pending_recv:
+            self.__pending_recv -= 1
+        return self.__smb_connection.readFile(self.__tid, self.__handle, bytesToRead = self._max_recv_frag)
 
     def get_smb_connection(self):
         return self.__smb_connection
@@ -611,5 +613,4 @@ class LOCALTransport(DCERPCTransport):
         os.write(self.__handle, data)
 
     def recv(self, forceRecv = 0, count = 0 ):
-        data = os.read(self.__handle, 65535)
-        return data
+        return os.read(self.__handle, 65535)

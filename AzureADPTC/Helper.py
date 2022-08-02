@@ -38,8 +38,9 @@ class NegoExHelper:
         # data should be parsed to get only challenge
         session_key, cipher, tgtResponse = decrypt_pk_dh(kerberosASResponse.decode('hex'), self._userCert, self._certPass, self._diffieHellmanExchange)
         apReq = getKerberosTGS(cipher, session_key, tgtResponse, self._asReq + kerberosASResponse)
-        dataToSend = self._nego.negoexApRequest(apReq, self._dataToSend + ''.join(returnStructs))
-        return dataToSend
+        return self._nego.negoexApRequest(
+            apReq, self._dataToSend + ''.join(returnStructs)
+        )
 
     def ExtractSubSessionKey(self, response):
         gssAPIData = response['Data'].encode('hex')[16:]
